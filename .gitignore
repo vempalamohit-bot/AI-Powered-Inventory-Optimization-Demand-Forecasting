@@ -1,0 +1,84 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+develop-eggs/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+pip-wheel-metadata/
+share/python-wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+MANIFEST
+
+# Virtual Environment
+.venv/
+venv/
+ENV/
+env/
+
+# IDEs
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# Node.js
+node_modules/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+package-lock.json
+.pnpm-debug.log*
+
+# Build outputs
+dist/
+*.log
+
+# Database (rebuilt from CSVs via setup_database.py)
+*.db
+*.db-journal
+*.db-wal
+*.db-shm
+*.sqlite
+*.sqlite3
+*.backup_before_migration
+
+# Environment variables
+.env
+.env.local
+.env.*.local
+
+# OS
+Thumbs.db
+.DS_Store
+
+# Project specific
+*.zip
+*.docx
+backend - Shortcut.lnk
+Factory Floor Doctor/
+bulk_test.csv
+
+# API imports cache (regenerated at runtime)
+backend/data/api_imports/raw/*.json
+backend/data/api_imports/processed/*.json
+backend/data/api_imports/manifest.json
+
+# Duplicate CSV (identical to sales_dense.csv)
+data/sales_2years_small.csv
+
+# Colab-generated server (recreated by notebook)
+backend/colab_server.py
