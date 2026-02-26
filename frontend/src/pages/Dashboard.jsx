@@ -550,14 +550,22 @@ const Dashboard = () => {
                                         }
                                         return [value, name];
                                     }}
-                                    labelFormatter={(date) => {
-                                        const d = new Date(date);
-                                        return d.toLocaleDateString('en-US', { 
-                                            weekday: 'short',
-                                            year: 'numeric', 
-                                            month: 'short', 
-                                            day: 'numeric' 
-                                        });
+                                    labelFormatter={(label) => {
+                                        if (selectedPeriod === 'daily') {
+                                            const d = new Date(label);
+                                            if (!isNaN(d.getTime())) {
+                                                return d.toLocaleDateString('en-US', { 
+                                                    weekday: 'short',
+                                                    year: 'numeric', 
+                                                    month: 'short', 
+                                                    day: 'numeric' 
+                                                });
+                                            }
+                                        }
+                                        if (selectedPeriod === 'wow') return `Week: ${label}`;
+                                        if (selectedPeriod === 'mom') return `Month: ${label}`;
+                                        if (selectedPeriod === 'yoy') return `Year: ${label}`;
+                                        return label;
                                     }}
                                     labelStyle={{ fontWeight: '600', color: '#0f172a', marginBottom: '4px' }}
                                     cursor={{ stroke: '#0D9488', strokeWidth: 1, strokeDasharray: '5 5' }}

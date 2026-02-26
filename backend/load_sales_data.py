@@ -29,9 +29,10 @@ def load_sales_csv():
     try:
         # Build SKU to product_id mapping
         print("Building SKU mapping...")
-        products = db.query(Product.id, Product.sku).all()
+        products = db.query(Product.id, Product.sku, Product.unit_cost).all()
         sku_to_id = {p.sku: p.id for p in products}
-        print(f"✓ Mapped {len(sku_to_id)} SKUs")
+        product_costs = {p.id: p.unit_cost for p in products if p.unit_cost}
+        print(f"✓ Mapped {len(sku_to_id)} SKUs, {len(product_costs)} with costs")
         
         # Clear existing sales data (optional - comment out if you want to append)
         db.query(SalesHistory).delete()
@@ -72,8 +73,17 @@ def load_sales_csv():
                 # Add optional fields if they exist
                 if 'unit_cost_at_sale' in row and pd.notna(row['unit_cost_at_sale']):
                     record['unit_cost_at_sale'] = float(row['unit_cost_at_sale'])
+                elif product_id in sku_to_id.values():
+                    # Look up product cost from mapping
+                    if product_id in product_costs:
+                        record['unit_cost_at_sale'] = product_costs[product_id]
+                
                 if 'profit_loss_amount' in row and pd.notna(row['profit_loss_amount']):
                     record['profit_loss_amount'] = float(row['profit_loss_amount'])
+                elif unit_price and product_id in product_costs:
+                    # Compute profit/loss from price and cost
+                    qty = int(row['quantity_sold'])
+                    record['profit_loss_amount'] = (unit_price - product_costs[product_id]) * qty
                 if 'channel' in row and pd.notna(row['channel']):
                     record['channel'] = str(row['channel'])
                 if 'is_promotional' in row and pd.notna(row['is_promotional']):

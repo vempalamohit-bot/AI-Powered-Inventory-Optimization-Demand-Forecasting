@@ -1799,6 +1799,47 @@ def get_dashboard_fast(period: str = "daily", db: Session = Depends(get_db)):
                     'loss': round(loss, 2)
                 })
         
+        # --- ADD STOCKOUT OPPORTUNITY LOSS ---
+        # Estimate daily lost revenue from out-of-stock products and add to recent periods
+        if sales_trend and latest_sale_date:
+            try:
+                stockout_sql = text("""
+                    SELECT 
+                        COALESCE(SUM(demand.avg_daily_qty * p.unit_price), 0) as daily_stockout_loss,
+                        COUNT(*) as oos_count
+                    FROM products p
+                    INNER JOIN (
+                        SELECT product_id,
+                               CAST(SUM(quantity_sold) AS FLOAT) / 
+                               MAX(1, JULIANDAY(MAX(date)) - JULIANDAY(MIN(date))) as avg_daily_qty
+                        FROM sales_history
+                        WHERE date >= :demand_cutoff
+                        GROUP BY product_id
+                        HAVING avg_daily_qty > 0
+                    ) demand ON demand.product_id = p.id
+                    WHERE p.current_stock = 0
+                """)
+                demand_cutoff = (latest_sale_date - timedelta(days=90)).strftime('%Y-%m-%d')
+                stockout_result = db.execute(stockout_sql, {'demand_cutoff': demand_cutoff}).fetchone()
+                daily_stockout_loss = float(stockout_result[0]) if stockout_result else 0
+                
+                if daily_stockout_loss > 0:
+                    days_map = {'daily': 1, 'wow': 7, 'mom': 30, 'yoy': 365}
+                    days_per = days_map.get(period, 1)
+                    period_stockout_loss = daily_stockout_loss * days_per
+                    
+                    # Add stockout loss to the most recent periods (stockout is a current problem)
+                    # Weight: full loss for last period, 75% for 2nd-to-last, 50% for 3rd
+                    recent_count = min(3, len(sales_trend))
+                    weights = [1.0, 0.75, 0.5]
+                    for i in range(recent_count):
+                        idx = len(sales_trend) - 1 - i
+                        sales_trend[idx]['loss'] = round(
+                            sales_trend[idx]['loss'] + period_stockout_loss * weights[i], 2
+                        )
+            except Exception:
+                pass  # Don't break dashboard if stockout calc fails
+        
         # Get top 5 products - Calculate revenue from quantity * unit_price
         top_products = []
         if latest_sale_date:
@@ -2362,7 +2403,7 @@ def get_dashboard_metrics(period: str = "daily", db: Session = Depends(get_db)):
 
 @router.get("/analytics/product-sales-trend/{product_id}")
 def get_product_sales_trend(product_id: int, period: str = "daily", db: Session = Depends(get_db)):
-    """Get sales trend for a specific product with enhanced profit/loss tracking"""
+    """Get sales trend for a specific product with enhanced profit/loss tracking including stockout opportunity loss"""
     
     # Get product for cost calculations
     product = db.query(Product).filter(Product.id == product_id).first()
@@ -2373,22 +2414,22 @@ def get_product_sales_trend(product_id: int, period: str = "daily", db: Session 
     if period == "wow":
         days_back = 84  # 12 weeks
         date_grouping = lambda d: (d.year, d.isocalendar()[1])  # (year, week)
-        period_label = lambda year, week: f"W{week} {year}"
+        period_label_fn = lambda year, week: f"W{week} {year}"
         period_display_date = lambda year, week: f"{year}-W{week:02d}"
     elif period == "mom":
         days_back = 365  # 12 months
         date_grouping = lambda d: (d.year, d.month)  # (year, month)
-        period_label = lambda year, month: datetime(year, month, 1).strftime('%b %Y')
+        period_label_fn = lambda year, month: datetime(year, month, 1).strftime('%b %Y')
         period_display_date = lambda year, month: f"{year}-{month:02d}-01"
     elif period == "yoy":
         days_back = 730  # 2 years for YOY comparison
         date_grouping = lambda d: (d.year, 1)  # (year, dummy)
-        period_label = lambda year, dummy: str(year)
+        period_label_fn = lambda year, dummy: str(year)
         period_display_date = lambda year, dummy: f"{year}-01-01"
     else:  # daily
         days_back = 30
         date_grouping = lambda d: (d.year, d.month, d.day)
-        period_label = lambda year, month, day: f"{year}-{month:02d}-{day:02d}"
+        period_label_fn = lambda year, month, day: f"{year}-{month:02d}-{day:02d}"
         period_display_date = lambda year, month, day: f"{year}-{month:02d}-{day:02d}"
     
     # Get sales for this specific product
@@ -2430,17 +2471,88 @@ def get_product_sales_trend(product_id: int, period: str = "daily", db: Session 
         else:
             sales_by_period[period_key]['loss'] += abs(profit_loss)
     
+    # --- STOCKOUT OPPORTUNITY LOSS ---
+    # Compute avg daily demand from the FULL history (not just recent) for stable estimate
+    all_product_sales = db.query(
+        func.sum(SalesHistory.quantity_sold).label('total_qty'),
+        func.count(func.distinct(func.date(SalesHistory.date))).label('sale_days'),
+        func.min(SalesHistory.date).label('first_sale'),
+        func.max(SalesHistory.date).label('last_sale')
+    ).filter(SalesHistory.product_id == product_id).first()
+    
+    avg_daily_demand = 0
+    avg_daily_revenue = 0
+    if all_product_sales and all_product_sales.total_qty and all_product_sales.first_sale:
+        total_span_days = max(1, (all_product_sales.last_sale - all_product_sales.first_sale).days)
+        avg_daily_demand = float(all_product_sales.total_qty) / total_span_days
+        avg_daily_revenue = avg_daily_demand * float(product.unit_price)
+    
+    # Generate ALL expected periods to fill gaps (stockout = no sales = missing periods)
+    now = datetime.now()
+    all_period_keys = set()
+    
+    if period == "daily":
+        d = cutoff_date
+        while d <= now:
+            all_period_keys.add((d.year, d.month, d.day))
+            d += timedelta(days=1)
+    elif period == "wow":
+        d = cutoff_date
+        while d <= now:
+            iso = d.isocalendar()
+            all_period_keys.add((iso[0], iso[1]))
+            d += timedelta(weeks=1)
+    elif period == "mom":
+        d = cutoff_date.replace(day=1)
+        while d <= now:
+            all_period_keys.add((d.year, d.month))
+            if d.month == 12:
+                d = d.replace(year=d.year + 1, month=1)
+            else:
+                d = d.replace(month=d.month + 1)
+    elif period == "yoy":
+        for y in range(cutoff_date.year, now.year + 1):
+            all_period_keys.add((y, 1))
+    
+    # Days per period for stockout loss estimation
+    days_per_period = {'daily': 1, 'wow': 7, 'mom': 30, 'yoy': 365}.get(period, 1)
+    expected_period_revenue = avg_daily_revenue * days_per_period
+    
+    # Fill missing periods with stockout loss if product is out of stock or had low stock
+    is_out_of_stock = product.current_stock is not None and product.current_stock == 0
+    
+    for pk in all_period_keys:
+        if pk not in sales_by_period:
+            sales_by_period[pk] = {
+                'quantity': 0, 'revenue': 0, 'profit': 0, 'loss': 0,
+                'first_date': None
+            }
+    
     # Build complete sales trend with proper date formats
     sales_trend = []
     for period_key in sorted(sales_by_period.keys()):
         data = sales_by_period[period_key]
+        
+        # Compute stockout opportunity loss for this period
+        stockout_loss = 0.0
+        # Only compute stockout loss for out-of-stock or critically low stock products
+        is_low_stock = (product.current_stock is not None and 
+                        product.current_stock < avg_daily_demand * 7)  # Less than 1 week of demand
+        if avg_daily_revenue > 0 and (is_out_of_stock or is_low_stock):
+            actual_rev = data['revenue']
+            if actual_rev < expected_period_revenue * 0.5:
+                # Revenue significantly below expected = stockout opportunity loss
+                stockout_loss = expected_period_revenue - actual_rev
+        
+        total_loss = data['loss'] + stockout_loss
+        
         sales_trend.append({
-            'date': period_display_date(*period_key),  # Valid ISO date for tooltip
-            'period_label': period_label(*period_key),  # Display label for X-axis
+            'date': period_display_date(*period_key),
+            'period_label': period_label_fn(*period_key),
             'quantity': data['quantity'],
             'revenue': round(data['revenue'], 2),
             'profit': round(data['profit'], 2),
-            'loss': round(data['loss'], 2)
+            'loss': round(total_loss, 2)
         })
     
     return sales_trend
