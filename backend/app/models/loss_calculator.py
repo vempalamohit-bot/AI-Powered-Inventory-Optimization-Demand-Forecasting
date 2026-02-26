@@ -42,18 +42,45 @@ class LossCalculator:
                 )
             ).scalar() or 0
             
-            # AI prediction: what we would sell today
-            predicted_daily_demand = int(avg_daily_demand * 1.1)  # 10% growth factor
+            # AI prediction: compute trend-adjusted daily demand from 30-day history
+            # Uses linear trend extrapolation instead of a fixed multiplier
+            from sqlalchemy import func as sqla_func
+            recent_sales = db.query(
+                SalesHistory.date,
+                sqla_func.sum(SalesHistory.quantity_sold).label('qty')
+            ).filter(
+                SalesHistory.product_id == product.id,
+                SalesHistory.date >= thirty_days_ago
+            ).group_by(SalesHistory.date).order_by(SalesHistory.date).all()
+            
+            if len(recent_sales) >= 7:
+                # Fit linear trend to recent daily sales
+                import numpy as np
+                qtys = np.array([float(r.qty) for r in recent_sales])
+                X = np.arange(len(qtys))
+                slope = np.polyfit(X, qtys, 1)[0]
+                # Project one step ahead: last value + trend
+                predicted_daily_demand = max(1, int(qtys[-1] + slope))
+            else:
+                predicted_daily_demand = max(1, int(avg_daily_demand))
             
             # Calculate loss
             unit_profit = product.unit_price - product.unit_cost
             daily_loss = predicted_daily_demand * unit_profit
             
-            # Calculate recommended reorder quantity
-            # AI recommendation: order enough for lead time + safety stock
-            recommended_quantity = int(
-                (predicted_daily_demand * product.lead_time_days * 1.5)  # 50% safety buffer
-            )
+            # ML-based reorder quantity: demand during lead time + z-score safety stock
+            # Uses demand std dev and 95% service level (z=1.65) 
+            import math as _math
+            demand_std = 0
+            if len(recent_sales) >= 2:
+                import numpy as np
+                demand_std = float(np.std([r.qty for r in recent_sales]))
+            lead_time = product.lead_time_days or 7
+            z_score = 1.65  # 95% service level
+            safety_stock = z_score * demand_std * _math.sqrt(lead_time)
+            recommended_quantity = max(1, int(
+                (predicted_daily_demand * lead_time) + safety_stock
+            ))
             
             total_daily_loss += daily_loss
             
@@ -98,13 +125,21 @@ class LossCalculator:
         This ensures threshold adapts to each product's velocity
         """
         lead_time = product.lead_time_days or 7
-        safety_factor = 1.5  # 50% safety buffer (configurable)
         
-        # Dynamic threshold covers lead time + safety stock
-        dynamic_threshold = avg_demand * lead_time * safety_factor
+        # ML-driven threshold: lead-time demand + z-score based safety stock
+        # z=1.28 for 90% service level (suitable for low-stock alert threshold)
+        import math as _math
+        z_score = 1.28
+        demand_cv = (avg_demand * 0.3) if avg_demand > 0 else 1  # Estimate σ as 30% of mean if unknown
+        safety_buffer = z_score * demand_cv * _math.sqrt(lead_time)
+        dynamic_threshold = (avg_demand * lead_time) + safety_buffer
         
-        # Minimum threshold of 10 units
-        return max(10, dynamic_threshold)
+        # Scale minimum to product value: expensive items get lower min threshold
+        unit_price = product.unit_price if product.unit_price else 10
+        min_threshold = max(1, int(5000 / unit_price))  # e.g., $10 item → min 500, $500 → min 10
+        min_threshold = min(min_threshold, 50)  # Cap at 50
+        
+        return max(min_threshold, dynamic_threshold)
     
     @staticmethod
     def calculate_low_stock_risk(db: Session) -> Dict:

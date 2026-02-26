@@ -13,7 +13,9 @@ import math
 class ReorderCalculator:
     """Calculate reorder points and stockout risk for products"""
     
-    SAFETY_STOCK_MULTIPLIER = 1.5  # 50% buffer for demand variability
+    # Safety stock uses z-score for 95% service level instead of flat multiplier
+    SERVICE_LEVEL = 0.95  # Target service level
+    Z_SCORE = 1.65  # scipy.stats.norm.ppf(0.95) ≈ 1.65
     FORECAST_DAYS = 30
     STOCKOUT_RISK_THRESHOLD_DAYS = 7  # Days until stockout triggers HIGH risk
     
@@ -89,9 +91,10 @@ class ReorderCalculator:
         lead_time = product.lead_time_days or 7
         
         # Reorder Point = (Avg Daily Demand × Lead Time) + Safety Stock
-        # Safety Stock = Z-score × std dev × sqrt(lead time)
-        # For simplicity, using variance multiplier approach
-        safety_stock = (demand_variance * ReorderCalculator.SAFETY_STOCK_MULTIPLIER) + (avg_daily_demand * 0.5)
+        # Safety Stock = z-score × σ_demand × √(lead_time)  [proper newsvendor formula]
+        safety_stock = ReorderCalculator.Z_SCORE * demand_variance * math.sqrt(lead_time)
+        # Minimum safety stock: at least 1 day of demand as baseline
+        safety_stock = max(safety_stock, avg_daily_demand)
         
         reorder_point = (avg_daily_demand * lead_time) + safety_stock
         
@@ -151,10 +154,14 @@ class ReorderCalculator:
             risk_percentage = min(100, 100 - (days_until_stockout / ReorderCalculator.STOCKOUT_RISK_THRESHOLD_DAYS * 80))
         elif days_until_stockout <= ReorderCalculator.STOCKOUT_RISK_THRESHOLD_DAYS * 2:
             risk_level = "MEDIUM"
-            risk_percentage = 50
+            # Scale risk: 14 days → ~30%, 8 days → ~65% (linear interpolation within band)
+            band_width = ReorderCalculator.STOCKOUT_RISK_THRESHOLD_DAYS  # 7 days
+            position_in_band = (ReorderCalculator.STOCKOUT_RISK_THRESHOLD_DAYS * 2 - days_until_stockout) / band_width
+            risk_percentage = 30 + position_in_band * 40  # 30% to 70% range
         else:
             risk_level = "LOW"
-            risk_percentage = 20
+            # Scale risk: further out → lower risk (exponential decay)
+            risk_percentage = max(5, 30 * math.exp(-0.05 * (days_until_stockout - ReorderCalculator.STOCKOUT_RISK_THRESHOLD_DAYS * 2)))
         
         # Adjust risk based on forecast if available
         if forecast_demand and forecast_demand > avg_daily_demand * 1.2:

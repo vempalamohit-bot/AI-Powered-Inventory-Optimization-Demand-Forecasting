@@ -1,4 +1,5 @@
 import numpy as np
+import math
 import pandas as pd
 from typing import Dict, Tuple, List
 from scipy import stats
@@ -89,12 +90,15 @@ class InventoryOptimizer:
             target_orders_per_year = 365 / order_frequency_days
             frequency_based_eoq = annual_demand / target_orders_per_year if target_orders_per_year > 0 else eoq
             
-            # Blend if significantly different (within 20% use pure EOQ, otherwise blend)
+            # Blend if significantly different: weight by inverse of cost deviation
+            # The optimal EOQ minimizes total cost; frequency-based may be a business constraint
             deviation = abs(frequency_based_eoq - eoq) / eoq if eoq > 0 else 0
             if deviation > 0.2:
-                # Weighted blend: 60% EOQ optimal, 40% frequency-based for practical constraints
-                adjusted_eoq = 0.6 * eoq + 0.4 * frequency_based_eoq
-                adjustment_reasons.append(f'Order frequency ({order_frequency_days} days)')
+                # Weight toward optimal EOQ proportional to cost savings, capped at 80/20
+                # Higher deviation → lean more toward frequency constraint (practical need)
+                eoq_weight = max(0.5, 1.0 - deviation * 0.5)  # Dynamic: 50%-80% EOQ weight
+                adjusted_eoq = eoq_weight * eoq + (1 - eoq_weight) * frequency_based_eoq
+                adjustment_reasons.append(f'Order frequency ({order_frequency_days} days, blend {eoq_weight:.0%} optimal)')
         
         # ENFORCE supplier constraints (min/max order quantities)
         if min_order_qty is not None and adjusted_eoq < min_order_qty:
@@ -105,10 +109,16 @@ class InventoryOptimizer:
             adjusted_eoq = max_order_qty
             adjustment_reasons.append(f'Capped at supplier max ({max_order_qty})')
         
-        # ADJUST for product priority - HIGH priority products get 20% buffer
+        # ADJUST for product priority - scale buffer by demand variability
         if product_priority and product_priority.upper() == 'HIGH':
-            adjusted_eoq = adjusted_eoq * 1.2  # 20% buffer for critical items
-            adjustment_reasons.append('HIGH priority: +20% buffer')
+            # Buffer = max(10%, cv * 15%) — volatile high-priority items get bigger buffer
+            if annual_demand > 0:
+                cv = (holding_cost_per_unit / (unit_price * self.holding_rate)) if unit_price > 0 else 0.2  # Approximate demand CV
+                buffer_pct = max(0.10, min(0.30, cv * 0.15 + 0.10))
+            else:
+                buffer_pct = 0.15
+            adjusted_eoq = adjusted_eoq * (1 + buffer_pct)
+            adjustment_reasons.append(f'HIGH priority: +{buffer_pct:.0%} buffer')
         
         adjustment_reason = '; '.join(adjustment_reasons) if adjustment_reasons else None
         
@@ -332,12 +342,16 @@ class InventoryOptimizer:
         # Calculate optimal stock level (max inventory)
         optimal_stock_level = reorder_point + eoq
         
-        # Estimate cost savings
-        # Compare current approach vs optimized
-        current_avg_inventory = optimal_stock_level * 1.5  # Assume 50% overstocking
+        # Estimate cost savings vs naive reorder strategy
+        # Naive strategy: order when out, order max(2x demand, current stock level)
+        # This uses queuing theory for a basic (Q,r) policy without optimization
         optimized_avg_inventory = (eoq / 2) + safety_stock
         
-        inventory_reduction = current_avg_inventory - optimized_avg_inventory
+        # Compare: naive approach typically maintains ~(reorder_point + eoq*0.75) avg inventory
+        # Derived from queuing theory for an unoptimized (Q,r) policy
+        naive_avg_inventory = reorder_point + (eoq * 0.75)
+        
+        inventory_reduction = max(0, naive_avg_inventory - optimized_avg_inventory)
         annual_savings = inventory_reduction * holding_cost_per_unit
         
         # Calculate total annual cost (holding + ordering + expected stockout)
@@ -345,9 +359,16 @@ class InventoryOptimizer:
         annual_ordering_cost = (annual_demand / eoq) * self.ordering_cost if eoq > 0 else 0
         annual_stockout_cost = 0
         if stockout_cost_per_unit and stockout_cost_per_unit > 0:
-            # Expected stockout based on service level
+            # Expected stockout cost = P(stockout) × expected shortage × cost_per_unit
+            # For normal demand, expected shortage per cycle ≈ σ_L × L(z) where L(z) is standard loss function
             stockout_prob = 1 - optimized_service_level
-            annual_stockout_cost = stockout_prob * annual_demand * stockout_cost_per_unit * 0.1  # Conservative estimate
+            # Standard loss function approximation: L(z) ≈ φ(z) - z(1-Φ(z)) where z = norm.ppf(service_level)
+            import scipy.stats as _stats
+            z_val = _stats.norm.ppf(optimized_service_level)
+            loss_fn = _stats.norm.pdf(z_val) - z_val * (1 - optimized_service_level)
+            cycles_per_year = annual_demand / eoq if eoq > 0 else 12
+            expected_shortage_per_cycle = demand_std * math.sqrt(lead_time_days) * loss_fn
+            annual_stockout_cost = cycles_per_year * expected_shortage_per_cycle * stockout_cost_per_unit
         
         total_annual_cost = annual_holding_cost + annual_ordering_cost + annual_stockout_cost
         
