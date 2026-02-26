@@ -332,7 +332,7 @@ const Forecasting = () => {
                         <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="var(--accent-primary)" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/></svg>
                         Forecast Visualization
                     </h3>
-                    <ForecastChart data={forecastData} showConfidenceBand={true} />
+                    <ForecastChart data={forecastData} />
 
                     {/* Business-Friendly Forecast Explanation */}
                     <div style={{ marginTop: '1.5rem', padding: '1.25rem', background: '#f0fdf4', borderRadius: '10px', border: '1px solid #bbf7d0' }}>
@@ -364,9 +364,8 @@ const Forecasting = () => {
                                                 <div style={{ marginTop: '0.75rem', padding: '0.75rem', background: 'rgba(255,255,255,0.7)', borderRadius: '8px' }}>
                                                     <strong>📊 Reading the Chart:</strong>
                                                     <ul style={{ margin: '0.5rem 0 0 1rem', paddingLeft: '0.5rem' }}>
-                                                        <li><strong>Green area (Historical)</strong> = Your actual past sales - what really happened</li>
-                                                        <li><strong>Blue line (Forecast)</strong> = Our prediction for future sales</li>
-                                                        <li><strong>Shaded band</strong> = "Safety zone" - 95% chance sales fall within this range</li>
+                                                        <li><strong style={{ color: '#6366f1' }}>Purple area (Historical)</strong> = Your actual past sales — what really happened</li>
+                                                        <li><strong style={{ color: '#0D9488' }}>Teal dashed line (Forecast)</strong> = Our AI prediction for future sales</li>
                                                     </ul>
                                                 </div>
                                                 

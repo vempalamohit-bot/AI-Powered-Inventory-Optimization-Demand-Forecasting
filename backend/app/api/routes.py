@@ -64,8 +64,8 @@ router = APIRouter(prefix="/api", tags=["api"])
 # Stock Threshold Configuration (Global, synced across all endpoints)
 # ============================================================
 STOCK_THRESHOLDS = {
-    'low_stock_max': 50,      # Stock <= this is "Low Stock"
-    'medium_stock_max': 100,  # Stock <= this is "Medium Stock", > low_stock_max
+    'low_stock_max': 10,      # Stock <= this is "Low Stock"
+    'medium_stock_max': 50,   # Stock <= this is "Medium Stock", > low_stock_max
     # Stock > medium_stock_max is "High Stock"
     # Stock == 0 is always "Out of Stock"
 }
