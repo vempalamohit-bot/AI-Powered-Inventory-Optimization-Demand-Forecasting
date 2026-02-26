@@ -4,7 +4,7 @@ import Navbar from './components/Navbar';
 import Dashboard from './pages/Dashboard';
 import Products from './pages/Products';
 import Forecasting from './pages/Forecasting';
-import MarkdownOptimizerPage from './pages/MarkdownOptimizerPage';
+import Optimization from './pages/Optimization';
 import Settings from './pages/Settings';
 import './styles/index.css';
 
@@ -17,7 +17,7 @@ function App() {
                     <Route path="/" element={<Dashboard />} />
                     <Route path="/products" element={<Products />} />
                     <Route path="/forecasting" element={<Forecasting />} />
-                    <Route path="/markdown" element={<MarkdownOptimizerPage />} />
+                    <Route path="/optimization" element={<Optimization />} />
                     <Route path="/settings" element={<Settings />} />
                 </Routes>
             </div>
