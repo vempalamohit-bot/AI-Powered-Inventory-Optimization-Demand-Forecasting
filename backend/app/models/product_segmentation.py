@@ -24,10 +24,10 @@ class ProductSegmenter:
     
     def __init__(self):
         self.segment_thresholds = {
-            'cv_stable': 0.3,  # CV < 0.3 = stable
-            'cv_volatile': 0.7,  # CV > 0.7 = volatile
-            'zero_intermittent': 0.3,  # >30% zeros = intermittent
-            'seasonality_strong': 0.6  # Seasonality strength > 0.6 = seasonal
+            'cv_stable': 0.4,  # CV < 0.4 = stable
+            'cv_volatile': 0.6,  # CV > 0.6 = volatile
+            'zero_intermittent': 0.25,  # >25% zeros = intermittent
+            'seasonality_strong': 0.3  # Seasonality strength > 0.3 = seasonal
         }
     
     def segment_product(self, sales_data: pd.DataFrame) -> Dict:

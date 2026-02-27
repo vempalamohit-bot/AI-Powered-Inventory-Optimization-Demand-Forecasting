@@ -511,11 +511,15 @@ class EnhancedDemandForecaster:
             self.model = fitted
             
             forecast_result = fitted.get_forecast(steps=forecast_weeks)
-            forecast_mean = np.maximum(forecast_result.predicted_mean.values, 0)
+            forecast_mean = np.maximum(np.asarray(forecast_result.predicted_mean), 0)
             conf_int = forecast_result.conf_int()
             
-            lower_bound = np.maximum(conf_int.iloc[:, 0].values, 0)
-            upper_bound = np.maximum(conf_int.iloc[:, 1].values, 0)
+            if hasattr(conf_int, 'iloc'):
+                lower_bound = np.maximum(np.asarray(conf_int.iloc[:, 0]), 0)
+                upper_bound = np.maximum(np.asarray(conf_int.iloc[:, 1]), 0)
+            else:
+                lower_bound = np.maximum(np.asarray(conf_int[:, 0]), 0)
+                upper_bound = np.maximum(np.asarray(conf_int[:, 1]), 0)
             
             forecast_dates = pd.date_range(
                 start=df_weekly['date'].iloc[-1] + (timedelta(weeks=2) if agg_period == 'biweekly' else timedelta(weeks=1)),
