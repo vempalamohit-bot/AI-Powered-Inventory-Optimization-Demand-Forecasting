@@ -90,8 +90,13 @@ class ProductSchema:
         'item_code': 'sku',
         'product_name': 'name',
         'title': 'name',
-        'description': 'name',
         'item_name': 'name',
+        # Note: 'description' maps to 'description' column (not 'name')
+        # APIs with both 'title' and 'description' (FakeStore, DummyJSON) get correct mapping
+        'desc': 'description',
+        'product_description': 'description',
+        'brand': 'description',  # store brand in description if no dedicated column
+        'minimumorderquantity': 'min_order_qty',
         
         # Stock and inventory
         'stock': 'current_stock',
@@ -382,7 +387,10 @@ class DataMapper:
                 # Map to standard field name
                 if key_lower in schema.FIELD_ALIASES:
                     target_key = schema.FIELD_ALIASES[key_lower]
-                    mapped_dict[target_key] = value
+                    # Don't overwrite if target already set by a higher-priority key
+                    # e.g. 'title' → 'name' should not be overwritten by 'description' → 'name'
+                    if target_key not in mapped_dict:
+                        mapped_dict[target_key] = value
                 else:
                     mapped_dict[key_lower] = value
             

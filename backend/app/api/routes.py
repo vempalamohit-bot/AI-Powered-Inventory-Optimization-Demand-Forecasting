@@ -3636,6 +3636,9 @@ async def import_from_external_api(
                             ProductSchema.FIELD_TYPES,
                             ProductSchema.FIELD_DEFAULTS
                         )
+                        # Strip keys that don't exist on Product model
+                        valid_cols = {c.name for c in Product.__table__.columns}
+                        product_data = {k: v for k, v in product_data.items() if k in valid_cols}
                         new_product = Product(**product_data)
                         db.add(new_product)
                         records_added += 1
