@@ -840,35 +840,70 @@ def get_intelligent_forecast(product_id: int, forecast_days: int = Query(30, ali
                 if h['actual'] > hist_cap:
                     h['actual'] = int(hist_cap)
         
-        # Build forecast array of objects from parallel arrays
-        forecast_list = []
+        # ===== Aggregate daily forecast to WEEKLY integers =====
+        # Daily fractions (0.1-0.5/day) are meaningless — aggregate to weekly
+        # totals (2-5/week) that make business sense and display as integers.
         forecast_dates = result.get('forecast_dates', [])
         forecast_values = result.get('forecast', [])
         lower_bounds = result.get('lower_bound', [])
         upper_bounds = result.get('upper_bound', [])
         
+        from collections import OrderedDict
+        weekly_buckets = OrderedDict()
+        
         for i in range(len(forecast_dates)):
             date_val = forecast_dates[i]
-            date_str = date_val if isinstance(date_val, str) else date_val.strftime('%Y-%m-%d') if hasattr(date_val, 'strftime') else str(date_val)
-            # Strip time portion if present (e.g., "2026-02-15T00:00:00" -> "2026-02-15")
-            if 'T' in date_str:
-                date_str = date_str.split('T')[0]
+            # Parse to datetime
+            if isinstance(date_val, str):
+                dt = datetime.strptime(date_val.split('T')[0], '%Y-%m-%d')
+            elif hasattr(date_val, 'strftime'):
+                dt = date_val if isinstance(date_val, datetime) else datetime.combine(date_val, datetime.min.time())
+            else:
+                dt = datetime.fromisoformat(str(date_val).split('T')[0])
             
+            # Get ISO week Monday
+            monday = dt - timedelta(days=dt.weekday())
+            week_key = monday.strftime('%Y-%m-%d')
+            
+            if week_key not in weekly_buckets:
+                weekly_buckets[week_key] = {'predicted': 0.0, 'lower_bound': 0.0, 'upper_bound': 0.0}
+            
+            weekly_buckets[week_key]['predicted'] += float(forecast_values[i]) if i < len(forecast_values) else 0
+            weekly_buckets[week_key]['lower_bound'] += float(lower_bounds[i]) if i < len(lower_bounds) else 0
+            weekly_buckets[week_key]['upper_bound'] += float(upper_bounds[i]) if i < len(upper_bounds) else 0
+        
+        # Build forecast list with integer weekly values
+        forecast_list = []
+        for week_key, bucket in weekly_buckets.items():
             forecast_list.append({
-                'date': date_str,
-                'predicted': round(float(forecast_values[i]), 2) if i < len(forecast_values) else 0,
-                'lower_bound': round(float(lower_bounds[i]), 2) if i < len(lower_bounds) else 0,
-                'upper_bound': round(float(upper_bounds[i]), 2) if i < len(upper_bounds) else 0,
+                'date': week_key,
+                'predicted': max(int(round(bucket['predicted'])), 0),
+                'lower_bound': max(int(round(bucket['lower_bound'])), 0),
+                'upper_bound': max(int(round(bucket['upper_bound'])), 0),
             })
         
-        # Extract segment info
+        # Compute weekly summary for frontend
+        predicted_vals = [f['predicted'] for f in forecast_list]
+        total_predicted = sum(predicted_vals)
+        num_weeks = len(forecast_list)
+        avg_weekly = round(total_predicted / max(num_weeks, 1), 1)
+        
+        # AI-driven safety buffer based on demand segment
         segment_info = result.get('segment_info', {})
+        segment_name = segment_info.get('segment', 'MODERATE')
+        safety_factors = {
+            'STABLE_FLAT': 0.10, 'STABLE_TRENDING': 0.15,
+            'SEASONAL_STABLE': 0.20, 'SEASONAL_VOLATILE': 0.30,
+            'MODERATE': 0.20, 'VOLATILE': 0.35, 'INTERMITTENT': 0.25,
+        }
+        safety_pct = safety_factors.get(segment_name, 0.20)
+        recommended_stock = max(int(round(total_predicted * (1 + safety_pct))), 1)
         
         # Build final response in frontend-expected format
         response = {
             'historical': historical,
             'forecast': forecast_list,
-            'segment': segment_info.get('segment', 'UNKNOWN'),
+            'segment': segment_name,
             'model_used': result.get('model_used', 'ARIMA'),
             'confidence_level': result.get('confidence_level', 0.95),
             'model_type': result.get('model_type', 'statistical'),
@@ -880,6 +915,15 @@ def get_intelligent_forecast(product_id: int, forecast_days: int = Query(30, ali
                 'category': product.category,
                 'current_stock': product.current_stock,
                 'unit_price': float(product.unit_price) if product.unit_price else None
+            },
+            'forecast_summary': {
+                'total_predicted': total_predicted,
+                'num_weeks': num_weeks,
+                'avg_weekly': avg_weekly,
+                'min_weekly': min(predicted_vals) if predicted_vals else 0,
+                'max_weekly': max(predicted_vals) if predicted_vals else 0,
+                'recommended_stock': recommended_stock,
+                'safety_buffer_pct': int(safety_pct * 100),
             }
         }
         

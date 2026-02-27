@@ -1051,16 +1051,25 @@ class EnhancedDemandForecaster:
         if drivers:
             parts.append(f"Key factors: {', '.join(drivers)}.")
         
-        # Forecast summary
+        # Forecast summary — aggregate to weekly for meaningful metrics
         forecast_values = forecast_summary.get('forecast', [0])
-        avg_forecast = np.mean(forecast_values)
-        max_forecast = np.max(forecast_values)
-        min_forecast = np.min(forecast_values)
-        
-        if max_forecast > 0 and min_forecast >= 0 and max_forecast > min_forecast * 1.3:
-            parts.append(f"Predicted daily demand ranges from {min_forecast:.1f} to {max_forecast:.1f} units, reflecting natural demand cycles.")
+        # Compute weekly sums: if many entries (daily data), group by 7
+        if len(forecast_values) > 10:
+            weekly_sums = []
+            for i in range(0, len(forecast_values), 7):
+                weekly_sums.append(sum(forecast_values[i:i+7]))
         else:
-            parts.append(f"Expected average daily demand: {avg_forecast:.1f} units.")
+            weekly_sums = list(forecast_values)  # Already weekly/biweekly
+        
+        avg_weekly = np.mean(weekly_sums) if weekly_sums else 0
+        max_weekly = np.max(weekly_sums) if weekly_sums else 0
+        min_weekly = np.min(weekly_sums) if weekly_sums else 0
+        total_forecast = sum(weekly_sums)
+        
+        if max_weekly > 0 and min_weekly >= 0 and max_weekly > min_weekly * 1.3:
+            parts.append(f"Predicted weekly demand ranges from {int(round(min_weekly))} to {int(round(max_weekly))} units, reflecting natural demand cycles. Total forecast: {int(round(total_forecast))} units.")
+        else:
+            parts.append(f"Expected average weekly demand: {int(round(avg_weekly))} units. Total forecast: {int(round(total_forecast))} units.")
         
         # Confidence
         conf = self.segment_info.get('confidence', 'medium')

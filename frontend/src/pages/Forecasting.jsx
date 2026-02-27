@@ -105,12 +105,15 @@ const Forecasting = () => {
 
             setForecastData([...historical, ...forecast]);
             
-            // Store metadata (segment, model, explanation)
+            // Store metadata (segment, model, explanation, forecast summary)
             setForecastMetadata({
                 segment: data.segment,
                 modelUsed: data.model_used,
                 businessExplanation: data.business_explanation,
-                characteristics: data.characteristics || {}
+                characteristics: data.characteristics || {},
+                forecastSummary: data.forecast_summary || {},
+                confidenceLevel: data.confidence_level,
+                productInfo: data.product_info || {}
             });
 
         } catch (error) {
@@ -346,39 +349,67 @@ const Forecasting = () => {
                                 </div>
                                 <div style={{ fontSize: '0.9rem', color: '#14532d', lineHeight: '1.7' }}>
                                     {(() => {
-                                        const forecastOnly = forecastData.filter(d => d.predicted !== undefined && d.predicted !== null);
-                                        const historicalOnly = forecastData.filter(d => d.actual !== undefined && d.actual !== null);
-                                        const totalPredicted = forecastOnly.reduce((sum, d) => sum + (d.predicted || 0), 0);
-                                        const avgDaily = forecastOnly.length > 0 ? totalPredicted / forecastOnly.length : 0;
-                                        const lastHistorical = historicalOnly.length > 0 ? historicalOnly[historicalOnly.length - 1]?.actual : 0;
-                                        const firstPrediction = forecastOnly.length > 0 ? forecastOnly[0]?.predicted : 0;
-                                        const lastPrediction = forecastOnly.length > 0 ? forecastOnly[forecastOnly.length - 1]?.predicted : 0;
-                                        const trend = lastPrediction > firstPrediction * 1.1 ? 'increasing' : lastPrediction < firstPrediction * 0.9 ? 'decreasing' : 'stable';
+                                        const fs = forecastMetadata?.forecastSummary || {};
+                                        const totalPredicted = fs.total_predicted ?? 0;
+                                        const numWeeks = fs.num_weeks ?? 0;
+                                        const avgWeekly = fs.avg_weekly ?? 0;
+                                        const minWeekly = fs.min_weekly ?? 0;
+                                        const maxWeekly = fs.max_weekly ?? 0;
+                                        const recommendedStock = fs.recommended_stock ?? 0;
+                                        const safetyPct = fs.safety_buffer_pct ?? 20;
+                                        const segment = forecastMetadata?.segment?.replace(/_/g, ' ') || 'MODERATE';
+                                        const modelUsed = forecastMetadata?.modelUsed || 'AI Model';
+                                        const confidence = forecastMetadata?.confidenceLevel 
+                                            ? `${Math.round(forecastMetadata.confidenceLevel * 100)}%` : '95%';
+                                        
+                                        const trend = maxWeekly > avgWeekly * 1.2 ? 'increasing' 
+                                            : minWeekly < avgWeekly * 0.8 ? 'variable' : 'stable';
                                         
                                         return (
                                             <>
-                                                <strong>Summary:</strong> Over the next <strong>{forecastOnly.length} days</strong>, we predict you'll sell approximately 
-                                                <strong style={{ color: '#15803d' }}> {Math.round(totalPredicted).toLocaleString()} units</strong> of <strong>{selectedProductName}</strong> 
-                                                {avgDaily > 0 && <> (about <strong>{avgDaily.toFixed(1)} units per day</strong>)</>}.
+                                                <strong>Summary:</strong> Over the next <strong>{numWeeks} weeks</strong>, we predict you'll sell approximately 
+                                                <strong style={{ color: '#15803d' }}> {totalPredicted.toLocaleString()} units</strong> of <strong>{selectedProductName}</strong> 
+                                                {avgWeekly > 0 && <> (about <strong>{Math.round(avgWeekly)} units per week</strong>)</>}.
+                                                
+                                                {/* AI-generated explanation from the model */}
+                                                {forecastMetadata?.businessExplanation && (
+                                                    <div style={{ marginTop: '0.75rem', padding: '0.75rem', background: 'rgba(255,255,255,0.7)', borderRadius: '8px', borderLeft: '3px solid #4338ca' }}>
+                                                        <strong style={{ color: '#4338ca' }}>🤖 AI Analysis ({modelUsed}):</strong>
+                                                        <div style={{ marginTop: '0.3rem' }}>{forecastMetadata.businessExplanation}</div>
+                                                    </div>
+                                                )}
                                                 
                                                 <div style={{ marginTop: '0.75rem', padding: '0.75rem', background: 'rgba(255,255,255,0.7)', borderRadius: '8px' }}>
                                                     <strong>📊 Reading the Chart:</strong>
                                                     <ul style={{ margin: '0.5rem 0 0 1rem', paddingLeft: '0.5rem' }}>
                                                         <li><strong style={{ color: '#6366f1' }}>Purple area (Historical)</strong> = Your actual past sales — what really happened</li>
-                                                        <li><strong style={{ color: '#0D9488' }}>Teal dashed line (Forecast)</strong> = Our AI prediction for future sales</li>
+                                                        <li><strong style={{ color: '#0D9488' }}>Teal dashed line (Forecast)</strong> = AI prediction for future weekly demand</li>
                                                     </ul>
                                                 </div>
                                                 
                                                 <div style={{ marginTop: '0.75rem' }}>
-                                                    <strong>📈 Trend:</strong> Demand appears to be <strong>{trend}</strong> over this period.
-                                                    {trend === 'increasing' && ' Consider ordering more stock to capitalize on growing demand.'}
-                                                    {trend === 'decreasing' && ' Consider reducing order quantities to avoid excess inventory.'}
-                                                    {trend === 'stable' && ' Current inventory levels should be maintained.'}
+                                                    <strong>📈 Trend:</strong> Weekly demand 
+                                                    {minWeekly !== maxWeekly 
+                                                        ? <> ranges from <strong>{minWeekly}</strong> to <strong>{maxWeekly}</strong> units</>
+                                                        : <> is steady at <strong>{avgWeekly}</strong> units</>
+                                                    } — pattern is <strong>{trend}</strong>.
+                                                    {trend === 'increasing' && ' Consider increasing order quantities to meet rising demand.'}
+                                                    {trend === 'variable' && ' Monitor weekly sales and adjust orders accordingly.'}
+                                                    {trend === 'stable' && ' Current inventory strategy should be maintained.'}
                                                 </div>
                                                 
                                                 <div style={{ marginTop: '0.75rem', padding: '0.75rem', background: 'rgba(22, 163, 74, 0.1)', borderRadius: '8px', borderLeft: '3px solid #16a34a' }}>
-                                                    <strong>💡 Action Recommended:</strong> Ensure you have at least <strong>{Math.round(totalPredicted * 1.2).toLocaleString()} units</strong> available 
-                                                    (forecast + 20% safety buffer) to maintain a 95% service level and avoid stockouts.
+                                                    <strong>💡 AI Recommendation:</strong> Based on <strong>{segment}</strong> demand pattern 
+                                                    and <strong>{confidence}</strong> confidence level, maintain at least <strong>{recommendedStock.toLocaleString()} units</strong> available 
+                                                    (forecast + {safetyPct}% AI-computed safety buffer) to avoid stockouts.
+                                                    {forecastMetadata?.productInfo?.current_stock !== undefined && (
+                                                        <> Current stock: <strong>{forecastMetadata.productInfo.current_stock} units</strong>.
+                                                        {forecastMetadata.productInfo.current_stock >= recommendedStock 
+                                                            ? <span style={{ color: '#16a34a', fontWeight: 600 }}> ✅ Stock is sufficient.</span>
+                                                            : <span style={{ color: '#dc2626', fontWeight: 600 }}> ⚠️ Consider reordering {recommendedStock - forecastMetadata.productInfo.current_stock} units.</span>
+                                                        }
+                                                        </>
+                                                    )}
                                                 </div>
                                             </>
                                         );
