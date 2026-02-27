@@ -917,9 +917,9 @@ class EnhancedDemandForecaster:
         
         return {
             'forecast_dates': forecast_dates.tolist(),
-            'forecast': np.round(forecast_mean).astype(int).tolist(),
-            'lower_bound': np.round(lower_bound).astype(int).tolist(),
-            'upper_bound': np.round(upper_bound).astype(int).tolist(),
+            'forecast': np.round(forecast_mean, 2).tolist(),
+            'lower_bound': np.round(lower_bound, 2).tolist(),
+            'upper_bound': np.round(upper_bound, 2).tolist(),
             'model_used': self.model_name,
             'confidence_level': 0.80,
             'model_type': 'fallback_average',
@@ -987,9 +987,9 @@ class EnhancedDemandForecaster:
         
         return {
             'forecast_dates': daily_dates.tolist(),
-            'forecast': np.round(daily_forecast).astype(int).tolist(),
-            'lower_bound': np.round(daily_lower).astype(int).tolist(),
-            'upper_bound': np.round(daily_upper).astype(int).tolist(),
+            'forecast': np.round(daily_forecast, 2).tolist(),
+            'lower_bound': np.round(daily_lower, 2).tolist(),
+            'upper_bound': np.round(daily_upper, 2).tolist(),
             'model_used': weekly_result['model_used'],
             'confidence_level': weekly_result['confidence_level'],
             'model_type': weekly_result['model_type']

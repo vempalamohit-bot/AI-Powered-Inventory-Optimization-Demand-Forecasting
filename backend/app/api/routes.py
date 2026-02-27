@@ -856,9 +856,9 @@ def get_intelligent_forecast(product_id: int, forecast_days: int = Query(30, ali
             
             forecast_list.append({
                 'date': date_str,
-                'predicted': int(round(forecast_values[i])) if i < len(forecast_values) else 0,
-                'lower_bound': int(round(lower_bounds[i])) if i < len(lower_bounds) else 0,
-                'upper_bound': int(round(upper_bounds[i])) if i < len(upper_bounds) else 0,
+                'predicted': round(float(forecast_values[i]), 2) if i < len(forecast_values) else 0,
+                'lower_bound': round(float(lower_bounds[i]), 2) if i < len(lower_bounds) else 0,
+                'upper_bound': round(float(upper_bounds[i]), 2) if i < len(upper_bounds) else 0,
             })
         
         # Extract segment info
