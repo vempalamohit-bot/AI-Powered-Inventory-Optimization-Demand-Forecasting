@@ -7,8 +7,8 @@ Usage:
 
 This script:
  1. Creates all SQLAlchemy tables (products, sales_history, forecasts, etc.)
- 2. Loads data/products_50k.csv  → products table   (50,000 rows)
- 3. Loads data/sales_dense.csv   → sales_history     (2M rows)
+ 2. Loads data/products_50k.csv  → products table   (~50,100 rows)
+ 3. Loads data/sales_dense.csv   → sales_history     (~2M rows, includes dense demo data for products 1-50)
 
 Runtime: ~30-60 seconds depending on hardware.
 """
@@ -103,6 +103,7 @@ def main():
     conn.execute("CREATE INDEX IF NOT EXISTS ix_products_category ON products (category)")
     conn.execute("CREATE INDEX IF NOT EXISTS ix_sales_history_id ON sales_history (id)")
     conn.execute("CREATE INDEX IF NOT EXISTS ix_sales_history_date ON sales_history (date)")
+    conn.execute("CREATE INDEX IF NOT EXISTS ix_sales_pid_date ON sales_history (product_id, date)")
     conn.commit()
 
     # ── Verify schema ──────────────────────────────────────────────────────────
