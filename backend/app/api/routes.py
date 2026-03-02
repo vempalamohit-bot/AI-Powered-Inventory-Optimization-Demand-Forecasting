@@ -4201,25 +4201,195 @@ async def generate_from_dummyjson(config: dict, db: Session = Depends(get_db)):
         db.commit()
         db.expire_all()  # Clear session state after bulk update() calls
         
-        # Generate sales history for the new products
+        # ── Generate realistic sales history + compute all 34 inventory fields ──
         sales_added = 0
+        import math
+
+        def _compute_all_product_fields(product, daily_sales_list, lead_time):
+            """
+            Compute every inventory field (matching products_50k.csv schema) from
+            the generated sales history.  No hardcoded placeholder values.
+            """
+            import numpy as np
+            n = len(daily_sales_list)
+            if n == 0:
+                return {}
+
+            arr = np.array(daily_sales_list, dtype=float)
+            avg_daily = float(np.mean(arr))
+            std_daily = float(np.std(arr)) if n > 1 else avg_daily * 0.3
+            cv = std_daily / avg_daily if avg_daily > 0 else 0.5  # demand volatility
+
+            # Safety stock: z * σ * √lead_time  (95 % service level → z = 1.645)
+            z = 1.645
+            safety_stock = round(z * std_daily * math.sqrt(lead_time), 2)
+
+            # Reorder point
+            rop = round(avg_daily * lead_time + safety_stock, 2)
+
+            # Annual demand
+            annual_demand = avg_daily * 365
+
+            # EOQ: √(2DS/H)  ordering_cost=50, holding_rate=25 %
+            ordering_cost = 50.0
+            holding_cost_pu = (product.unit_cost or product.unit_price * 0.6) * 0.25
+            eoq = round(math.sqrt(2 * annual_demand * ordering_cost / holding_cost_pu), 1) if holding_cost_pu > 0 else 50.0
+
+            # Seasonality factor: ratio of last-30-day avg to overall avg (proxy)
+            last30 = arr[-30:] if n >= 30 else arr
+            season_factor = round(float(np.mean(last30)) / avg_daily, 3) if avg_daily > 0 else 1.0
+            season_factor = max(0.5, min(2.0, season_factor))  # clamp to sane range
+
+            # Profit margin
+            cost = product.unit_cost or round(product.unit_price * 0.6, 2)
+            price = product.unit_price or 10.0
+            profit_margin = round((price - cost) / price, 4) if price > 0 else 0.3
+
+            # ABC classification by annual revenue rank (will be set post-loop for all products)
+            annual_revenue = annual_demand * price
+
+            # XYZ classification by coefficient of variation
+            if cv < 0.3:
+                xyz = 'X'   # stable
+            elif cv < 0.6:
+                xyz = 'Y'   # variable
+            else:
+                xyz = 'Z'   # highly volatile
+
+            # Inventory derived
+            avg_inventory = safety_stock + eoq / 2
+            inv_turnover = round(annual_demand / avg_inventory, 2) if avg_inventory > 0 else 0.0
+            weeks_supply = round(product.current_stock / (avg_daily * 7), 2) if avg_daily > 0 else 0.0
+
+            # Stock status
+            if product.current_stock <= 0:
+                stock_status = 'out_of_stock'
+            elif product.current_stock <= rop * 0.5:
+                stock_status = 'low_stock'
+            elif product.current_stock > rop * 3:
+                stock_status = 'overstock'
+            else:
+                stock_status = 'in_stock'
+
+            # Service level: A=0.97, B=0.95, C=0.90 — assigned after ABC, default 0.95
+            target_sl = 0.95
+
+            # Cost factors
+            storage_cost_pu = round(cost * 0.05, 4)        # 5 % of unit cost per year
+            stockout_cost_pu = round(price * 0.20, 4)      # 20 % of price per stockout unit
+
+            # Order frequency
+            order_freq = round(eoq / avg_daily) if avg_daily > 0 else 14
+            order_freq = max(1, min(365, int(order_freq)))
+
+            return {
+                'average_daily_demand': round(avg_daily, 4),
+                'demand_volatility': round(cv, 4),
+                'safety_stock': safety_stock,
+                'reorder_point': rop,
+                'economic_order_qty': eoq,
+                'seasonality_factor': season_factor,
+                'profit_margin': profit_margin,
+                'xyz_classification': xyz,
+                'inventory_turnover': inv_turnover,
+                'weeks_of_supply': weeks_supply,
+                'stock_status': stock_status,
+                'storage_cost_per_unit': storage_cost_pu,
+                'stockout_cost_per_unit': stockout_cost_pu,
+                'order_frequency_days': order_freq,
+                'max_order_qty': int(eoq * 3),
+                'target_service_level': target_sl,
+                '_annual_revenue': annual_revenue,  # temp for ABC ranking
+            }
+
         if records_added > 0:
-            products = db.query(Product).filter(Product.sku.like('DJ-%')).all()
-            for product in products:
-                stock = product.current_stock or 100
-                for days_ago in range(random.randint(30, 90)):
-                    if random.random() < 0.7:
-                        sale_date = datetime.now().date() - timedelta(days=days_ago)
-                        qty = random.randint(1, max(10, stock // 10))
+            dj_products = db.query(Product).filter(Product.sku.like('DJ-%')).all()
+            product_sales_map = {}  # product_id -> list of daily qty
+
+            # Generate 90 days of daily sales (realistic: 65% fill rate, slight trend)
+            today = datetime.now().date()
+            for product in dj_products:
+                stock = max(product.current_stock or 100, 10)
+                price = product.unit_price or 10.0
+                max_daily = max(1, stock // 10)
+                daily_qtys = []
+                for days_ago in range(90, -1, -1):  # oldest → newest
+                    if random.random() < 0.65:
+                        # Small upward trend: recent days slightly higher
+                        trend_mult = 1.0 + (90 - days_ago) * 0.002
+                        qty = max(1, int(random.randint(1, max_daily) * trend_mult))
+                        sale_date = today - timedelta(days=days_ago)
                         sale = SalesHistory(
                             product_id=product.id,
                             date=sale_date,
                             quantity_sold=qty,
-                            revenue=round(qty * (product.unit_price or 10.0), 2)
+                            revenue=round(qty * price, 2)
                         )
                         db.add(sale)
                         sales_added += 1
-        
+                        daily_qtys.append(qty)
+                    else:
+                        daily_qtys.append(0)
+                product_sales_map[product.id] = daily_qtys
+
+            db.flush()  # get sales into session before computing fields
+
+            # Compute fields per product
+            product_field_data = {}
+            for product in dj_products:
+                daily = product_sales_map.get(product.id, [])
+                nonzero = [q for q in daily if q > 0]
+                fields = _compute_all_product_fields(product, nonzero, product.lead_time_days or 7)
+                product_field_data[product.id] = fields
+
+            # ABC classification: top 20% revenue = A, next 30% = B, rest = C
+            sorted_by_rev = sorted(product_field_data.items(), key=lambda x: x[1].get('_annual_revenue', 0), reverse=True)
+            n_prod = len(sorted_by_rev)
+            for rank, (pid, fields) in enumerate(sorted_by_rev):
+                pct = rank / n_prod
+                if pct < 0.20:
+                    abc = 'A'; sl = 0.97; priority = 'HIGH'
+                elif pct < 0.50:
+                    abc = 'B'; sl = 0.95; priority = 'MEDIUM'
+                else:
+                    abc = 'C'; sl = 0.90; priority = 'LOW'
+                fields['abc_classification'] = abc
+                fields['target_service_level'] = sl
+                fields['product_priority'] = priority
+
+            # Apply all computed fields back to the product rows
+            for product in dj_products:
+                fields = product_field_data.get(product.id, {})
+                if not fields:
+                    continue
+                product.average_daily_demand   = fields.get('average_daily_demand')
+                product.demand_volatility       = fields.get('demand_volatility')
+                product.safety_stock            = fields.get('safety_stock')
+                product.reorder_point           = fields.get('reorder_point')
+                product.economic_order_qty      = fields.get('economic_order_qty')
+                product.seasonality_factor      = fields.get('seasonality_factor')
+                product.profit_margin           = fields.get('profit_margin')
+                product.xyz_classification      = fields.get('xyz_classification')
+                product.abc_classification      = fields.get('abc_classification')
+                product.inventory_turnover      = fields.get('inventory_turnover')
+                product.weeks_of_supply         = fields.get('weeks_of_supply')
+                product.stock_status            = fields.get('stock_status')
+                product.storage_cost_per_unit   = fields.get('storage_cost_per_unit')
+                product.stockout_cost_per_unit  = fields.get('stockout_cost_per_unit')
+                product.order_frequency_days    = fields.get('order_frequency_days')
+                product.max_order_qty           = fields.get('max_order_qty')
+                product.target_service_level    = fields.get('target_service_level')
+                product.product_priority        = fields.get('product_priority')
+                product.min_order_qty           = product.min_order_qty or random.choice([10, 25, 50])
+                product.unit_cost               = product.unit_cost or round((product.unit_price or 10.0) * 0.6, 2)
+                product.last_sale_date          = today
+                product.last_order_date         = today - timedelta(days=random.randint(7, 60))
+                product.shelf_life_days         = 0   # non-perishable default
+                product.weight_kg               = product.weight_kg or round(random.uniform(0.1, 25.0), 2)
+                product.volume_m3               = product.volume_m3 or round(random.uniform(0.001, 0.5), 4)
+                product.is_perishable           = False
+                product.is_hazardous            = False
+
         db.commit()
         
         # ── TIER 1b: Save processed / enriched snapshot ──
@@ -5156,6 +5326,11 @@ def simulate_demand_scenario(
 ):
     """Simulate impact of demand shift"""
     engine = ScenarioEngine()
+
+    # Use real product unit_cost from DB instead of a hardcoded assumption
+    product = db.query(Product).filter(Product.id == product_id).first()
+    real_unit_cost = product.unit_cost if product and product.unit_cost else 20.0
+    real_ordering_cost = product.ordering_cost if product and hasattr(product, 'ordering_cost') and product.ordering_cost else 50.0
     
     result = engine.simulate_demand_shift(
         current_demand,
@@ -5163,7 +5338,9 @@ def simulate_demand_scenario(
         current_eoq,
         current_rop,
         safety_stock,
-        avg_daily_demand
+        avg_daily_demand,
+        unit_cost=real_unit_cost,
+        ordering_cost=real_ordering_cost
     )
     
     # Save scenario
@@ -6454,7 +6631,8 @@ def analyze_markdown_opportunity(product_id: int, db: Session = Depends(get_db))
             unit_cost=product.unit_cost,
             unit_price=product.unit_price,
             daily_holding_cost=daily_holding_cost,
-            markdown_duration_days=14
+            markdown_duration_days=14,
+            category=product.category or 'general'
         )
         
         # Recommendation

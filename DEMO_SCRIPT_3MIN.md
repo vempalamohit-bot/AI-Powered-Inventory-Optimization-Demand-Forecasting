@@ -1,90 +1,88 @@
-# 3-Minute Technical Demo — AI/ML Inventory Optimization Engine
+# 3-Minute Technical Demo — AI Inventory Optimization
 
 **Start on:** Dashboard (`/`)
 
 ---
 
-### [0:00 – 0:15] INTRO
+### [0:00 – 0:12] INTRO
 
 *Dashboard visible*
 
-> "I'm Mohit Rao, Data and AI Engineering. This is an AI-powered inventory optimization engine — fifty thousand products, two million sales records. It uses multiple ML models for demand forecasting, an EOQ optimizer for reorder quantities, and a price elasticity model for markdown pricing. The AI classifies each product's demand pattern and selects the right model automatically."
+> "Hi, I'm Mohit Rao from Data and AI Engineering. This is an AI-powered inventory optimization engine — fifty thousand SKUs, two million sales records, FastAPI backend on SQLite WAL, React frontend. It runs seven ML models for demand forecasting, an EOQ optimizer with newsvendor service-level tuning for reorder quantities, and a log-log price elasticity model for markdown pricing. Every product gets auto-classified into a demand segment that drives which model runs."
 
 ---
 
-### [0:15 – 0:50] DASHBOARD — SUMMARY CARDS
+### [0:12 – 0:45] DASHBOARD
 
-**→ Point to Total Products**
+**→ Point to Total Products → click it**
 
-> "Total Products — full catalog. Click it — the system segments stock into four tiers. The Configure Thresholds button recalculates all fifty thousand products in real time against new boundaries."
+> "Fifty thousand products classified into four stock tiers. These thresholds are configurable — click Configure and it reclassifies all fifty thousand in real time."
 
 **→ Click Stockout Alerts card**
 
-> "Stockout Alerts — this is the reorder engine output. The AI computes days-to-stockout for every product by dividing current stock by the rolling-average sales velocity. Reorder quantities come from an Economic Order Quantity model that minimizes total ordering plus holding cost. Safety stock is layered on top — computed from demand variability and supplier lead time. Higher variability, bigger buffer."
+> "This is the reorder engine. Days-to-stockout is just current stock divided by rolling average daily demand. The optimal order quantity uses EOQ — square root of two times annual demand times ordering cost, divided by holding cost — where holding cost defaults to 25% of unit cost. Safety stock sits on top — z-score of 1.65 for 95% service level, times demand standard deviation, times square root of lead time. If we have stockout cost data, it switches to a newsvendor critical ratio — undersale cost divided by undersale plus oversale — clamped between 85% and 99% service level."
 
 *(close modal)*
 
-**→ Click Annual Savings card**
+**→ Click Annual Savings**
 
-> "Annual Savings — the delta between traditional ordering cost and EOQ-optimized ordering across the entire catalog. That's the AI-driven cost reduction."
+> "This is the cost delta — EOQ-optimized ordering versus naive ordering across the full catalog. It factors in holding cost, ordering cost, and expected stockout cost using the standard normal loss function."
 
 ---
 
-### [0:50 – 1:15] SALES TREND & ALERTS
+### [0:45 – 1:05] SALES TREND & ALERTS TABLE
 
 **→ Point to Sales Trend chart**
 
-> "Sales Trend — the raw time series data that feeds all our ML models. Switchable between daily, weekly, monthly, yearly — across quantity, revenue, profit, or loss. Filterable to any single product."
+> "Raw time series data feeding all our models — daily, weekly, monthly, yearly granularity, across quantity, revenue, profit, or loss. Filterable to any single product."
 
 **→ Scroll to Inventory Alerts table**
 
-> "Inventory Alerts — each row is AI-generated. Current stock, days until stockout, order-by date computed from lead time, daily revenue at risk, and an AI suggestion per product. These suggestions are not rules — they're computed from that product's specific demand velocity, lead time, and variability through the EOQ and safety stock models. Summary bar totals daily revenue at risk. Email alerts dispatch via SendGrid on threshold breach."
+> "Every row is computed, not rule-based. Buffer days equal days-to-stockout minus supplier lead time. Loss per day comes from linear trend extrapolation — numpy polyfit degree one on the trailing 30-day window — times unit margin. The order-by date subtracts lead time from projected stockout. Email alerts dispatch via SendGrid when buffer breaches threshold."
 
 ---
 
-### [1:15 – 1:50] PRODUCTS TAB
+### [1:05 – 1:35] PRODUCTS — AI SEGMENTATION
 
-**→ Click Products in navbar**
+**→ Click Products**
 
-> "Products page — the AI segmentation engine. Before any forecast runs, the system classifies every product into six demand segments — Stable Flat, Stable Trending, Seasonal Stable, Seasonal Volatile, Volatile, or Intermittent. It computes three ML features — coefficient of variation for demand variability, zero-sales percentage for sparse demand detection, and seasonality strength via seasonal decomposition. This segmentation drives which forecasting model gets selected downstream."
+> "Before any forecast runs, every product gets classified into one of seven demand segments using three engineered features. First — coefficient of variation, sigma over mu. CV under 0.4 is stable, above 0.6 is volatile. Second — zero-sales percentage. Above 25% flags intermittent demand. Third — seasonality strength via additive STL decomposition, testing periods at 7, 14, 30, and 90 days — it's seasonal variance divided by seasonal-plus-residual variance. Above 0.3 means seasonal. Trend direction comes from linear regression on the time index."
 
-**→ Click Out of Stock card**
-
-> "Out of Stock shows the AI-computed ordering recommendations — EOQ quantities adjusted by the product's demand classification."
+> "Decision logic runs in priority order — Intermittent first, then Seasonal-Stable, Seasonal-Volatile, Volatile, Stable-Trending, Stable-Flat, then Moderate as default. Each segment maps to a specific model priority list."
 
 **→ Click a product row**
 
-> "Product detail — the full AI output. Reorder point, EOQ quantity, demand metrics, and prioritized suggestions ranked by financial impact."
+> "Full AI output — reorder point, EOQ quantity, safety stock, demand characteristics, and prioritized suggestions ranked by financial impact."
 
 ---
 
-### [1:50 – 2:25] FORECASTING TAB
+### [1:35 – 2:15] FORECASTING — ML PIPELINE
 
-**→ Click Forecasting, select product, Generate Forecast**
+**→ Click Forecasting → select product → Generate Forecast**
 
-> "The core ML pipeline. Four time series models — Holt-Winters for exponential smoothing with trend and seasonality, SARIMA for autocorrelated seasonal patterns, Seasonal Naive as a baseline for intermittent demand, and Trend-Seasonal Decomposition. Plus two optional ML models — XGBoost gradient-boosted trees trained on lag features and rolling averages, and Facebook Prophet for strong seasonal cycles."
+> "The core ML pipeline. Sales data is aggregated to weekly internally to avoid zero-inflation from sparse daily sales — if under 50% of weeks have sales, it drops to biweekly. Seven models. Holt-Winters tries five configurations — additive, multiplicative, damped, linear, monthly — picks by AIC. SARIMA runs order 1-1-1 times 1-0-1 with seasonal period 13 or 4 weeks. Seasonal Naive repeats the last full cycle. Decomposition does additive STL plus linear regression on trend. XGBoost — 100 estimators, max depth 4, features are week, month, quarter, lags at 1, 2, 4, 8, 13 weeks, plus rolling mean and standard deviation at windows 4, 8, 13. Prophet adds weekly and yearly seasonality, additive mode."
 
-> "The AI selects models based on the product's segment. Seasonal-stable tries Holt-Winters first, then SARIMA. Volatile tries Decomposition first. Intermittent starts with Seasonal Naive. First successful model wins."
+> "Model selection is segment-driven. Seasonal-stable tries SARIMA first, then Holt-Winters. Volatile starts with XGBoost. Intermittent starts with Seasonal Naive. First successful model wins. If forecast CV is under 12%, it overlays the STL seasonal pattern for enrichment."
 
 *(point to chart)*
 
-> "Solid line — actual sales. Dashed line — AI prediction. Shaded band — confidence interval from the model's residual distribution. Wider band, less certainty."
+> "Purple area — actual sales. Teal dashed — AI prediction. Shaded band is 95% confidence — 1.96 times residual standard deviation, widening 2 to 5 percent per forecast step."
 
 ---
 
-### [2:25 – 2:50] OPTIMIZATION TAB
+### [2:15 – 2:50] OPTIMIZATION — MARKDOWN PRICING
 
-**→ Click Optimization, select product**
+**→ Click Optimization → select product**
 
-> "Markdown optimizer — two ML models. Linear regression on sales velocity to detect demand trend direction. Then price elasticity via log-log regression — how sensitive is demand to price changes. High elasticity means discounts work, low means they won't."
+> "Markdown optimizer using category-specific price elasticity — Electronics at negative 1.8, Baby Products at negative 0.9 — adjusted by margin bracket. Optimal discount formula is absolute elasticity minus one, over two times absolute elasticity, constrained between 5% and 40% max."
 
-> "Five scenarios simulated — five to forty percent off. Each computes demand lift, units cleared, revenue, and net profit. The highlighted row is the AI's optimal discount — the break-even point where extra volume stops compensating for margin loss."
+> "Five scenarios — 10% through 30% off over a 14-day window. Each computes demand lift, units cleared, revenue, and net profit. Best scenario selected by maximum net profit — that's the highlighted row. Urgency score is a 0-to-100 composite — inventory days factor up to 40 points, velocity inverse up to 30, elasticity up to 20, margin factor up to 10."
 
 ---
 
 ### [2:50 – 3:00] CLOSE
 
-> "AI segmentation into six classes driving automatic model selection. EOQ reorder optimization. Price elasticity markdown pricing. Fifty thousand products, two million records, all automated. Questions?"
+> "So — seven ML models with automatic segment-driven selection, EOQ plus newsvendor reorder optimization, category-specific price elasticity for markdown pricing. Fifty thousand products, two million records, fully automated. This is an excellent applied AI project for real-world inventory optimization. Happy to take questions."
 
 ---
 
@@ -92,36 +90,44 @@
 
 | Section              | Duration     | Words |
 |:---------------------|:-------------|:------|
-| Intro                | 0:00 – 0:15 | ~50   |
-| Dashboard Cards      | 0:15 – 0:50 | ~95   |
-| Sales Trend & Alerts | 0:50 – 1:15 | ~85   |
-| Products Tab         | 1:15 – 1:50 | ~95   |
-| Forecasting Tab      | 1:50 – 2:25 | ~105  |
-| Optimization Tab     | 2:25 – 2:50 | ~70   |
-| Close                | 2:50 – 3:00 | ~25   |
-| **Total**            | **3:00**     | **~525** |
+| Intro                | 0:00 – 0:12 | ~45   |
+| Dashboard            | 0:12 – 0:45 | ~105  |
+| Sales Trend & Alerts | 0:45 – 1:05 | ~80   |
+| Products Segmentation| 1:05 – 1:35 | ~90   |
+| Forecasting          | 1:35 – 2:15 | ~120  |
+| Optimization         | 2:15 – 2:50 | ~100  |
+| Close                | 2:50 – 3:00 | ~35   |
+| **Total**            | **3:00**     | **~575** |
 
-*Pace: ~175 wpm (brisk live demo). Tight but deliverable.*
+*Pace: ~190 wpm (conversational-fast). Very comfortable for live delivery.*
 
 ---
 
-### FORMULAS & ALGORITHMS REFERENCE
+### IF YOU'RE ASKED TECHNICAL FOLLOW-UPS
 
-| Algorithm | Formula / Method | Where Shown | Purpose |
-|:----------|:----------------|:------------|:--------|
-| EOQ | Q* = √(2DS/H) | Dashboard, Products | Optimal order quantity minimizing total inventory cost |
-| Safety Stock | SS = z × σ_d × √L | Dashboard AI suggestions | Buffer for demand uncertainty at 95% service level |
-| Days-to-Stockout | DTS = stock / d̄ | Dashboard, Stockout Alerts | Time until zero inventory |
-| Revenue-at-Risk | Σ P(stockout) × daily_rev | Dashboard summary bar | Aggregate opportunity cost of inaction |
-| CV | σ/μ | Products segmenter | Demand variability → Stable/Volatile classification |
-| Zero-Sales % | weeks_zero / total | Products segmenter | Intermittent demand detector |
-| Seasonality Strength | Var(S) / Var(Y-T) | Products segmenter (STL) | Seasonal signal strength for model routing |
-| Holt-Winters | α, β, γ recurrence | Forecasting (Stable) | Exponential smoothing with trend + seasonality |
-| SARIMA | (p,d,q)(P,D,Q)_m MLE | Forecasting (Seasonal) | Autocorrelated seasonal modeling |
-| XGBoost | Boosted trees + lag features | Forecasting (Volatile) | Non-linear demand with engineered features |
-| Prophet | g(t) + s(t) + h(t) + ε | Forecasting (Seasonal) | Fourier seasonality + piecewise growth |
-| Seasonal Naive | ŷ_t = y_{t-m} | Forecasting (Intermittent) | Same-period-last-cycle baseline |
-| Weighted Ensemble | Σ(w_i × ŷ_i), w ∝ 1/MAPE | Forecasting (best overall) | Inverse-MAPE weighted combination |
-| Confidence Interval | ŷ ± 1.96 × σ_residual | Forecast chart band | 95% prediction uncertainty |
-| Price Elasticity | ε via ln(Q) = α + ε·ln(P) | Markdown Optimizer | Log-log regression for demand sensitivity |
-| Optimal Markdown | argmax [rev − margin_loss] | Markdown highlighted row | Break-even discount level |
+| Question | Quick Answer |
+|:---------|:-------------|
+| "What's the EOQ formula?" | "Square root of 2 times annual demand times ordering cost, divided by holding cost." |
+| "How does safety stock work?" | "Z-score times demand standard deviation times square root of lead time. We use 1.65 for 95% service level." |
+| "What features does XGBoost use?" | "Week number, month, quarter, lags at 1, 2, 4, 8, and 13 weeks, plus rolling mean and standard deviation." |
+| "How do you measure seasonality?" | "STL decomposition — seasonal variance divided by seasonal-plus-residual variance. Above 0.3 is seasonal." |
+| "What's the price elasticity model?" | "Log-log regression — log of quantity against log of price. Different base elasticity per product category." |
+| "How is optimal discount calculated?" | "Elasticity minus one, divided by two times elasticity — then constrained to max 40% or 80% of margin." |
+| "What confidence interval?" | "95% — that's 1.96 times the residual standard deviation, widening slightly each forecast step." |
+| "How many models?" | "Seven — Holt-Winters, SARIMA, Seasonal Naive, Decomposition, XGBoost, Prophet, and ensemble." |
+
+---
+
+### FORMULAS CHEAT SHEET (for your reference, not for speaking)
+
+| Algorithm | Formula |
+|:----------|:--------|
+| EOQ | Q* = √(2DS/H) |
+| Safety Stock | SS = z × σ_d × √L |
+| Days-to-Stockout | DTS = stock / avg_daily_demand |
+| Reorder Point | ROP = (avg_demand × lead_time) + safety_stock |
+| CV | σ / μ |
+| Seasonality | Var(seasonal) / Var(seasonal + residual) |
+| Confidence Interval | forecast ± 1.96 × σ_residual |
+| Price Elasticity | ln(Q) = α + ε·ln(P) |
+| Optimal Discount | d* = (|ε| − 1) / (2|ε|) |

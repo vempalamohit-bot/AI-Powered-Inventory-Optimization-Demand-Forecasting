@@ -367,7 +367,8 @@ class MarkdownOptimizer:
                                     unit_cost: float,
                                     unit_price: float,
                                     daily_holding_cost: float,
-                                    markdown_duration_days: int = 14) -> Dict:
+                                    markdown_duration_days: int = 14,
+                                    category: str = 'general') -> Dict:
         """
         Calculate revenue and profit impact of different markdown levels
         
@@ -383,6 +384,11 @@ class MarkdownOptimizer:
         
         daily_demand = monthly_demand / 30
         markdown_levels = [0.10, 0.15, 0.20, 0.25, 0.30]
+
+        # Compute elasticity from this product's actual price/cost/category
+        # so demand lift is model-driven, not a hardcoded lookup table
+        elasticity_data = self.estimate_price_elasticity(unit_price, unit_cost, category)
+        elasticity = elasticity_data['elasticity']  # e.g. -1.8 for Electronics
         
         scenarios = {
             'current (no markdown)': self._calculate_no_markdown_scenario(
@@ -393,18 +399,13 @@ class MarkdownOptimizer:
         for discount_pct in markdown_levels:
             scenario_name = f"{int(discount_pct*100)}% off"
             
-            # Assumptions: Each discount level increases sales
-            demand_lift = {
-                0.10: 1.15,  # 10% off -> 15% more units sold
-                0.15: 1.30,  # 15% off -> 30% more units
-                0.20: 1.50,  # 20% off -> 50% more units
-                0.25: 1.70,  # 25% off -> 70% more units
-                0.30: 1.85   # 30% off -> 85% more units
-            }
-            
+            # Demand lift computed from price elasticity model (linear demand curve):
+            # lift(d) = 1 + |ε| × d   (price reduction d% → |ε|×d% more units sold)
+            # Capped at 3x to avoid physically implausible projections
+            computed_lift = min(3.0, 1.0 + abs(elasticity) * discount_pct)
             markdown_price = unit_price * (1 - discount_pct)
-            lifted_daily_demand = daily_demand * demand_lift[discount_pct]
-            
+            lifted_daily_demand = daily_demand * computed_lift
+
             # How many units sell in markdown period?
             units_sold_in_markdown = int(min(lifted_daily_demand * markdown_duration_days, current_stock))
             units_remaining = current_stock - units_sold_in_markdown
@@ -425,7 +426,7 @@ class MarkdownOptimizer:
             
             scenarios[scenario_name] = {
                 'markdown_price': round(markdown_price, 2),
-                'demand_lift': f"{(demand_lift[discount_pct]-1)*100:.0f}%",
+                'demand_lift': f"{(computed_lift - 1)*100:.0f}%",
                 'units_sold': units_sold_in_markdown,
                 'units_remaining': units_remaining,
                 'units_cleared_pct': round(units_cleared_pct, 1),

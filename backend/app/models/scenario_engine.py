@@ -101,8 +101,8 @@ class ScenarioEngine:
         current_eoq: float,
         current_rop: float,
         safety_stock: float,
-        avg_daily_demand: float
-    ) -> Dict:
+        avg_daily_demand: float        unit_cost: float = 20.0,
+        ordering_cost: float = 50.0,    ) -> Dict:
         """
         Simulate impact of demand increase/decrease
         
@@ -122,8 +122,6 @@ class ScenarioEngine:
         
         # Recalculate EOQ with new demand
         holding_cost_rate = 0.25
-        unit_cost = 20  # Assumed
-        ordering_cost = 50
         holding_cost_per_unit = unit_cost * holding_cost_rate
         
         new_eoq = np.sqrt((2 * new_demand * ordering_cost) / holding_cost_per_unit)
