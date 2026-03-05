@@ -101,8 +101,10 @@ class ScenarioEngine:
         current_eoq: float,
         current_rop: float,
         safety_stock: float,
-        avg_daily_demand: float        unit_cost: float = 20.0,
-        ordering_cost: float = 50.0,    ) -> Dict:
+        avg_daily_demand: float,
+        unit_cost: float = 20.0,
+        ordering_cost: float = 50.0,
+    ) -> Dict:
         """
         Simulate impact of demand increase/decrease
         

@@ -2,8 +2,11 @@
 from __future__ import annotations
 
 import asyncio
+from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timedelta
 from typing import Dict, List
+
+_executor = ThreadPoolExecutor(max_workers=2)
 
 from sqlalchemy.orm import Session
 
@@ -42,6 +45,8 @@ class AlertScheduler:
             self._task = None
 
     async def _run_loop(self) -> None:
+        # Delay first run so the server can start accepting requests immediately
+        await asyncio.sleep(20)
         while self._running:
             await self._run_once()
             await asyncio.sleep(self.settings.alert_scheduler_interval_seconds)
@@ -50,7 +55,12 @@ class AlertScheduler:
         self.last_run_at = datetime.utcnow()
         db = SessionLocal()
         try:
-            alerts = AIAlertSystem.generate_live_alerts(db, limit=50)
+            # Run synchronous DB-heavy call in a thread to avoid blocking the event loop
+            loop = asyncio.get_event_loop()
+            alerts = await loop.run_in_executor(
+                _executor,
+                lambda: AIAlertSystem.generate_live_alerts(db, limit=50)
+            )
             stats = self._dispatch_alerts(db, alerts)
             self.last_run_status = {
                 'alerts_considered': len(alerts),
